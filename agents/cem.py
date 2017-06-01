@@ -7,8 +7,8 @@ import numpy as np
 from gym import wrappers
 from gym.spaces import Discrete, Box
 
-from agents.Agent import Agent
-from misc.Exceptions import WrongShapeError
+from agents.agent import Agent
+from misc.exceptions import WrongShapeError
 
 # ================================================================
 # Policies
@@ -60,7 +60,7 @@ class DeterministicContinuousActionLinearPolicy(object):
 class CEM(Agent):
     """Cross-Entropy Method learner"""
     def __init__(self, env, monitor_path, video=True, **usercfg):
-        super(CEM, self).__init__(env, **usercfg)
+        super(CEM, self).__init__(**usercfg)
         self.env = wrappers.Monitor(self.env, monitor_path, force=True, video_callable=(None if video else False))
         self.config.update(dict(
             num_steps=env.spec.tags.get("wrapper_config.TimeLimit.max_episode_steps"),  # maximum length of episode

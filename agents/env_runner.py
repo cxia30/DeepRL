@@ -2,23 +2,28 @@
 
 import numpy as np
 
-class Agent(object):
-    """Reinforcement Agent"""
-    def __init__(self, env, **usercfg):
-        super(Agent, self).__init__()
+class EnvRunner(object):
+    """Environment runner using a policy"""
+    def __init__(self, env, policy, config):
+        super(EnvRunner, self).__init__()
         self.env = env
         self.ob_space = self.env.observation_space
         self.action_space = self.env.action_space
         self.nO = self.ob_space.shape[0]
+        self.nA = env.action_space.n
+        self.policy = policy
         self.config = dict(
+            batch_update="timesteps",
             episode_max_length=env.spec.tags.get("wrapper_config.TimeLimit.max_episode_steps"),
             timesteps_per_batch=10000,
-            n_iter=100)
-        self.config.update(usercfg)
+            n_iter=100,
+            repeat_n_actions=1
+        )
+        self.config.update(config)
 
     def choose_action(self, state):
-        """Return which action to take based on the given state"""
-        pass
+        """Choose an action based on the current state in the environment."""
+        return self.policy.choose_action(state)
 
     def reset_env(self):
         """Reset the current environment and get the initial state"""
@@ -30,8 +35,8 @@ class Agent(object):
 
     def get_trajectory(self, render=False):
         """
-        Run agent-environment loop for one whole episode (trajectory)
-        Return dictionary of results
+        Run agent-environment loop for one whole episode (trajectory).
+        Returns dictionary of rewards, states, actions, whether a terminal state is reached and steps.
         """
         state = self.reset_env()
         states = []
@@ -69,7 +74,3 @@ class Agent(object):
             trajectories.append(trajectory)
             timesteps_total += len(trajectory["reward"])
         return trajectories
-
-    def learn(self):
-        """Learn in the current environment."""
-        pass
