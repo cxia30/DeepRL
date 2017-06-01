@@ -46,7 +46,9 @@ class AKTThread(Thread):
 
             good_probabilities = tf.reduce_sum(tf.multiply(self.probs, tf.one_hot(tf.cast(self.master.action_taken, tf.int32), self.nA)), reduction_indices=[1])
             eligibility = tf.log(good_probabilities + 1e-10) * self.master.advantage
-            self.loss = -tf.reduce_sum(eligibility)
+            regularizer = tf.contrib.layers.l1_regularizer(.05)
+
+            self.loss = -tf.reduce_sum(eligibility) + regularizer(self.sparse_representation)
 
     def run(self):
         """Run the appropriate learning algorithm."""
