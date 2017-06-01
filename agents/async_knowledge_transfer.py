@@ -44,7 +44,9 @@ class AKTThread(Thread):
 
             good_probabilities = tf.reduce_sum(tf.multiply(self.probs, tf.one_hot(tf.cast(self.master.action_taken, tf.int32), self.master.nA)), reduction_indices=[1])
             eligibility = tf.log(good_probabilities + 1e-10) * self.master.advantage
-            self.loss = -tf.reduce_sum(eligibility)
+            regularizer = tf.contrib.layers.l1_regularizer(.05)
+
+            self.loss = -tf.reduce_sum(eligibility) + regularizer(self.sparse_representation)
 
     def run(self):
         """Run the appropriate learning algorithm."""
@@ -141,7 +143,7 @@ class AsyncKnowledgeTransfer(Agent):
             decay=0.9,  # Decay of RMSProp optimizer
             epsilon=1e-9,  # Epsilon of RMSProp optimizer
             learning_rate=0.005,
-            n_hidden_units=20,
+            n_hidden_units=10,
             repeat_n_actions=1,
             n_task_variations=3,
             n_sparse_units=10,

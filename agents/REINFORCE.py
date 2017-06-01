@@ -2,8 +2,6 @@
 
 #  Policy Gradient Implementation
 #  Adapted for Tensorflow
-#  Other differences:
-#  - Always choose the action with the highest probability
 #  Source: http://rl-gym-doc.s3-website-us-west-2.amazonaws.com/mlss/lab2.html
 
 import numpy as np
@@ -120,14 +118,14 @@ class REINFORCEDiscrete(REINFORCE):
             inputs=self.states,
             num_outputs=self.config["n_hidden_units"],
             activation_fn=tf.tanh,
-            weights_initializer=tf.random_normal_initializer(),
+            weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
             biases_initializer=tf.zeros_initializer())
 
         self.probs = tf.contrib.layers.fully_connected(
             inputs=L1,
             num_outputs=self.nA,
             activation_fn=tf.nn.softmax,
-            weights_initializer=tf.random_normal_initializer(),
+            weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
             biases_initializer=tf.zeros_initializer())
 
         self.action = tf.squeeze(tf.multinomial(tf.log(self.probs), 1), name="action")
