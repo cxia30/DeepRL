@@ -25,9 +25,9 @@ class AKTThread(Thread):
         self.start_at_iter = start_at_iter
         self.add_accum_grad = None  # To be filled in later
 
-        self.build_networks()
         self.states = self.master.states
         self.session = self.master.session
+        self.build_networks()
         self.task_runner = EnvRunner(env, TaskPolicy(self.action, self), self.master.config)
 
         # Write the summary of each task in a different directory
@@ -38,13 +38,22 @@ class AKTThread(Thread):
     def build_networks(self):
         with tf.variable_scope("task{}".format(self.task_id)):
             self.sparse_representation = tf.Variable(tf.truncated_normal([self.master.config["n_sparse_units"], self.nA], mean=0.0, stddev=0.02))
-            self.probs = tf.nn.softmax(tf.matmul(self.master.L1, tf.matmul(self.master.knowledge_base, self.sparse_representation)))
+            self.L1 = tf.contrib.layers.fully_connected(
+                inputs=self.states,
+                num_outputs=self.master.config["n_hidden_units"],
+                activation_fn=tf.tanh,
+                weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
+                biases_initializer=tf.zeros_initializer(),
+                scope="L1")
+            self.probs = tf.nn.softmax(tf.matmul(self.L1, tf.matmul(self.master.knowledge_base, self.sparse_representation)))
 
             self.action = tf.squeeze(tf.multinomial(tf.log(self.probs), 1), name="action")
 
             good_probabilities = tf.reduce_sum(tf.multiply(self.probs, tf.one_hot(tf.cast(self.master.action_taken, tf.int32), self.nA)), reduction_indices=[1])
             eligibility = tf.log(good_probabilities + 1e-10) * self.master.advantage
             self.loss = -tf.reduce_sum(eligibility)
+
+            self.own_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
 
     def run(self):
         """Run the appropriate learning algorithm."""
@@ -176,11 +185,11 @@ class AsyncKnowledgeTransfer(Agent):
 
         for i, job in enumerate(self.jobs):
             only_sparse = (self.config["switch_at_iter"] is not None and i == len(self.jobs) - 1)
-            grads = tf.gradients(job.loss, (self.shared_vars if not(only_sparse) else []) + [job.sparse_representation])
+            grads = tf.gradients(job.loss, (self.shared_vars if not(only_sparse) else []) + job.own_vars)
             job.apply_grad = job.optimizer.apply_gradients(
                 zip(
                     grads,
-                    (self.shared_vars if not(only_sparse) else []) + [job.sparse_representation]
+                    (self.shared_vars if not(only_sparse) else []) + job.own_vars
                 ),
                 global_step=self.global_step
             )
@@ -199,17 +208,7 @@ class AsyncKnowledgeTransfer(Agent):
             self.action_taken = tf.placeholder(tf.float32, name="action_taken")
             self.advantage = tf.placeholder(tf.float32, name="advantage")
 
-            if self.config["feature_extraction"]:
-                self.L1 = tf.contrib.layers.fully_connected(
-                    inputs=self.states,
-                    num_outputs=self.config["n_hidden_units"],
-                    activation_fn=tf.tanh,
-                    weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
-                    biases_initializer=tf.zeros_initializer(),
-                    scope="L1")
-            else:
-                self.L1 = self.states
-            self.knowledge_base = tf.Variable(tf.truncated_normal([self.L1.get_shape()[-1].value, self.config["n_sparse_units"]], mean=0.0, stddev=0.02), name="knowledge_base")
+            self.knowledge_base = tf.Variable(tf.truncated_normal([self.config["n_hidden_units"], self.config["n_sparse_units"]], mean=0.0, stddev=0.02), name="knowledge_base")
 
             self.shared_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
 
