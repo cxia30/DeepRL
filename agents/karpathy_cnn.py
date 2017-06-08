@@ -8,9 +8,9 @@ import logging
 from gym import wrappers
 # import gym_ple
 
-from agents.Agent import Agent
+from agents.agent import Agent
 from misc.utils import discount_rewards, preprocess_image
-from misc.Reporter import Reporter
+from misc.reporter import Reporter
 from misc.network_ops import create_accumulative_gradients_op, add_accumulative_gradients_op, reset_accumulative_gradients_op
 
 logging.getLogger().setLevel("INFO")
@@ -76,7 +76,7 @@ class KarpathyCNN(Agent):
             inputs=reshape,
             num_outputs=self.config["n_hidden_units"],
             activation_fn=tf.nn.relu,
-            weights_initializer=tf.random_normal_initializer(stddev=0.01),
+            weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
             biases_initializer=tf.zeros_initializer())
 
         # Fully connected layer 2
@@ -84,7 +84,7 @@ class KarpathyCNN(Agent):
             inputs=self.L3,
             num_outputs=self.nA,
             activation_fn=tf.nn.softmax,
-            weights_initializer=tf.random_normal_initializer(),
+            weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
             biases_initializer=tf.zeros_initializer())
 
         self.action = tf.squeeze(tf.multinomial(tf.log(self.probs), 1), name="action")

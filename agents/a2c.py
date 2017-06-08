@@ -7,10 +7,10 @@ import logging
 
 from gym import wrappers
 
-from agents.Agent import Agent
+from agents.agent import Agent
 from misc.utils import discount_rewards
-from misc.Reporter import Reporter
-from agents.EnvRunner import EnvRunner
+from misc.reporter import Reporter
+from agents.env_runner import EnvRunner
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -125,7 +125,7 @@ class A2CDiscrete(A2C):
                 inputs=self.states,
                 num_outputs=self.config["actor_n_hidden"],
                 activation_fn=tf.tanh,
-                weights_initializer=tf.random_normal_initializer(),
+                weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
                 biases_initializer=tf.zeros_initializer(),
                 scope="L1")
 
@@ -133,7 +133,7 @@ class A2CDiscrete(A2C):
                 inputs=L1,
                 num_outputs=self.env_runner.nA,
                 activation_fn=tf.nn.softmax,
-                weights_initializer=tf.random_normal_initializer(),
+                weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
                 biases_initializer=tf.zeros_initializer(),
                 scope="probs")
 
@@ -154,7 +154,7 @@ class A2CDiscrete(A2C):
                 inputs=self.states,
                 num_outputs=self.config["critic_n_hidden"],
                 activation_fn=tf.tanh,
-                weights_initializer=tf.random_normal_initializer(),
+                weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
                 biases_initializer=tf.zeros_initializer(),
                 scope="L1")
 
@@ -162,7 +162,7 @@ class A2CDiscrete(A2C):
                 inputs=critic_L1,
                 num_outputs=1,
                 activation_fn=None,
-                weights_initializer=tf.random_normal_initializer(),
+                weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
                 biases_initializer=tf.zeros_initializer(),
                 scope="value")
 
@@ -221,14 +221,14 @@ class A2CContinuous(A2C):
                 inputs=self.states,
                 num_outputs=self.config["critic_n_hidden"],
                 activation_fn=tf.tanh,
-                weights_initializer=tf.random_normal_initializer(),
+                weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
                 biases_initializer=tf.zeros_initializer())
 
             self.critic_value = tf.contrib.layers.fully_connected(
                 inputs=critic_L1,
                 num_outputs=1,
                 activation_fn=None,
-                weights_initializer=tf.random_normal_initializer(),
+                weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
                 biases_initializer=tf.zeros_initializer())
 
             critic_loss = tf.reduce_mean(tf.squared_difference(self.critic_target, self.critic_value))

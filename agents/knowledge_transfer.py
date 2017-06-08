@@ -4,10 +4,10 @@ import os
 import numpy as np
 import tensorflow as tf
 
-from agents.Agent import Agent
-from agents.EnvRunner import EnvRunner
+from agents.agent import Agent
+from agents.env_runner import EnvRunner
 from misc.utils import discount_rewards
-from misc.Reporter import Reporter
+from misc.reporter import Reporter
 from misc.network_ops import create_accumulative_gradients_op, add_accumulative_gradients_op, reset_accumulative_gradients_op
 
 class TaskPolicy(object):
@@ -42,9 +42,10 @@ class KnowledgeTransfer(Agent):
             decay=0.9,  # Decay of RMSProp optimizer
             epsilon=1e-9,  # Epsilon of RMSProp optimizer
             learning_rate=0.005,
-            n_hidden_units=20,
+            n_hidden_units=10,
             repeat_n_actions=1,
-            n_sparse_units=10
+            n_sparse_units=10,
+            feature_extraction=False
         ))
         self.config.update(usercfg)
 
@@ -64,15 +65,19 @@ class KnowledgeTransfer(Agent):
             self.action_taken = tf.placeholder(tf.float32, name="action_taken")
             self.advantage = tf.placeholder(tf.float32, name="advantage")
 
-            L1 = tf.contrib.layers.fully_connected(
-                inputs=self.states,
-                num_outputs=self.config["n_hidden_units"],
-                activation_fn=tf.tanh,
-                weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
-                biases_initializer=tf.zeros_initializer(),
-                scope="L1")
+            L1 = None
+            if self.config["feature_extraction"]:
+                L1 = tf.contrib.layers.fully_connected(
+                    inputs=self.states,
+                    num_outputs=self.config["n_hidden_units"],
+                    activation_fn=tf.tanh,
+                    weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
+                    biases_initializer=tf.zeros_initializer(),
+                    scope="L1")
+            else:
+                L1 = self.states
 
-            knowledge_base = tf.Variable(tf.truncated_normal([self.config["n_hidden_units"], self.config["n_sparse_units"]], mean=0.0, stddev=0.02), name="knowledge_base")
+            knowledge_base = tf.Variable(tf.truncated_normal([L1.get_shape()[-1].value, self.config["n_sparse_units"]], mean=0.0, stddev=0.02), name="knowledge_base")
 
             self.shared_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="shared")
 
@@ -91,7 +96,7 @@ class KnowledgeTransfer(Agent):
             epsilon=self.config["epsilon"]
         )
         net_vars = self.shared_vars + sparse_representations
-        self.accum_grads = create_accumulative_gradients_op(net_vars, 1)
+        self.accum_grads = create_accumulative_gradients_op(net_vars, 0)
 
         self.loss = tf.placeholder("float", name="loss")
         summary_loss = tf.summary.scalar("Loss", self.loss)
@@ -120,14 +125,14 @@ class KnowledgeTransfer(Agent):
             all_vars = self.config["switch_at_iter"] is None or i != len(self.losses) - 1
             self.add_accum_grads.append(add_accumulative_gradients_op(
                 (self.shared_vars if all_vars else []) + [sparse_representations[i]],
-                self.accum_grads if all_vars else [self.accum_grads[-1]],
+                ([self.accum_grads[0]] if all_vars else []) + [self.accum_grads[i + 1]],
                 loss,
                 i
             ))
 
         self.apply_gradients = self.optimizer.apply_gradients(
             zip(self.accum_grads, net_vars))
-        self.reset_accum_grads = reset_accumulative_gradients_op(net_vars, self.accum_grads, 1)
+        self.reset_accum_grads = reset_accumulative_gradients_op(net_vars, self.accum_grads, 0)
 
         init = tf.global_variables_initializer()
 
@@ -143,7 +148,7 @@ class KnowledgeTransfer(Agent):
             self.session.run([self.reset_accum_grads])
             for i, task_runner in enumerate(self.task_runners):
                 if self.config["switch_at_iter"] is not None:
-                    if iteration > self.config["switch_at_iter"] and i != (len(self.task_runners) - 1):
+                    if iteration >= self.config["switch_at_iter"] and i != (len(self.task_runners) - 1):
                         continue
                     elif iteration < self.config["switch_at_iter"] and i == len(self.task_runners) - 1:
                         continue
@@ -164,7 +169,7 @@ class KnowledgeTransfer(Agent):
                 # Do policy gradient update step
                 episode_rewards = np.array([trajectory["reward"].sum() for trajectory in trajectories])  # episode total rewards
                 episode_lengths = np.array([len(trajectory["reward"]) for trajectory in trajectories])  # episode lengths
-                results = self.session.run([self.losses[i], self.add_accum_grads[i]], feed_dict={
+                results = self.session.run([self.losses[i], self.add_accum_grads[i], self.accum_grads], feed_dict={
                     self.states: all_state,
                     self.action_taken: all_action,
                     self.advantage: all_adv
