@@ -133,14 +133,14 @@ class REINFORCEDiscrete(REINFORCE):
             inputs=self.states,
             num_outputs=self.config["n_hidden_units"],
             activation_fn=tf.tanh,
-            weights_initializer=tf.random_normal_initializer(),
+            weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
             biases_initializer=tf.zeros_initializer())
 
         self.probs = tf.contrib.layers.fully_connected(
             inputs=L1,
             num_outputs=self.env_runner.nA,
             activation_fn=tf.nn.softmax,
-            weights_initializer=tf.random_normal_initializer(),
+            weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
             biases_initializer=tf.zeros_initializer())
 
         self.action = tf.squeeze(tf.multinomial(tf.log(self.probs), 1), name="action")
@@ -332,7 +332,7 @@ class REINFORCEDiscreteCNN(REINFORCEDiscrete):
             inputs=reshape,
             num_outputs=self.config["n_hidden_units"],
             activation_fn=tf.nn.relu,
-            weights_initializer=tf.random_normal_initializer(stddev=0.01),
+            weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.02),
             biases_initializer=tf.zeros_initializer())
 
         # Fully connected layer 2
