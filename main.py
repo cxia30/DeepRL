@@ -20,7 +20,9 @@ def run_experiment(spec, monitor_path=None):
         os.makedirs(monitor_path)
     envs_type = spec["environments"]["type"]
     if envs_type == "single":
-        envs = [make_environment(spec["environments"]["source"])]
+        env = make_environment(spec["environments"]["source"])
+        args["env"] = env
+        envs = [env]
     elif envs_type == "json":
         envs = make_environments(json_to_dict(spec["environments"]["source"]))
     args["envs"] = envs
