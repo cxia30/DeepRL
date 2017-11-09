@@ -57,7 +57,8 @@ def preprocess_image(img):
 
 def save_config(directory, config, envs):
     """Save the configuration of an agent to a file."""
-    config["envs"] = envs
+    filtered_config = {k: v for k, v in config.items() if not k.startswith("env")}
+    filtered_config["envs"] = envs
     # Save git information if possible
     try:
         import pygit2
@@ -67,11 +68,11 @@ def save_config(directory, config, envs):
             "commit": str(repo.head.target),
             "message": repo.head.get_object().message
         }
-        config["git"] = git
+        filtered_config["git"] = git
     except ImportError:
         pass
     with open(path.join(directory, "config.json"), "w") as outfile:
-        json.dump(config, outfile)
+        json.dump(filtered_config, outfile)
 
 def json_to_dict(filename):
     """Load a json file as a dictionary."""

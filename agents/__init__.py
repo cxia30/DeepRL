@@ -36,6 +36,11 @@ register_agent(name="AsyncKnowledgeTransfer",
                state_dimensions="single",
                action_space="discrete"
                )
+register_agent(name="AsyncKnowledgeTransfer",
+               entry_point="agents.async_knowledge_transfer:AsyncKnowledgeTransferRNNCNN",
+               state_dimensions="multi",
+               action_space="discrete"
+               )
 register_agent(name="CEM",
                entry_point="agents.cem:CEM",
                state_dimensions="single",
