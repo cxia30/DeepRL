@@ -59,11 +59,11 @@ class AKTThread(Thread):
     def run(self):
         """Run the appropriate learning algorithm."""
         if self.master.learning_method == "REINFORCE":
-            self.learn_REINFORCE()
+            self.learn_reinforce()
         else:
             self.learn_Karpathy()
 
-    def learn_REINFORCE(self):
+    def learn_reinforce(self):
         """Learn using updates like in the REINFORCE algorithm."""
         reporter = Reporter()
         total_n_trajectories = 0
@@ -213,7 +213,7 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         sess = self.master.session
         self.runner.start_runner(sess, self.writer)
         t = 1  # thread step counter
-        while self.master.T < self.config["T_max"] and not self.master.stop_requested:
+        while self.master.global_step.eval(session=sess) < self.config["T_max"] and not self.master.stop_requested:
             # Synchronize thread-specific parameters θ' = θ and θ'v = θv
             trajectory = self.pull_batch_from_queue()
             v = 0 if trajectory.terminal else self.get_critic_value(np.asarray(trajectory.states)[None, -1], trajectory.features[-1][0])
@@ -241,7 +241,6 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
             self.writer.add_summary(summary[0], results[-1])
             self.writer.flush()
             t += 1
-            self.master.T += trajectory.steps
         self.runner.stop_requested = True
 
 class AsyncKnowledgeTransfer(Agent):
@@ -279,14 +278,12 @@ class AsyncKnowledgeTransfer(Agent):
         with tf.variable_scope("global"):
             self.global_step = tf.get_variable("global_step", [], tf.int32, initializer=tf.constant_initializer(0, dtype=tf.int32), trainable=False)
             self.build_networks()
-
-            # self.loss = tf.placeholder("float", name="loss")
-            # summary_loss = tf.summary.scalar("Loss", self.loss)
-            # self.reward = tf.placeholder("float", name="reward")
-            # summary_rewards = tf.summary.scalar("Reward", self.reward)
-            # self.episode_length = tf.placeholder("float", name="episode_length")
-            # summary_episode_lengths = tf.summary.scalar("Episode_length", self.episode_length)
-            # self.summary_op = tf.summary.merge([summary_loss, summary_rewards, summary_episode_lengths])
+            self.losses, loss_summaries = self.create_summary_losses()
+            self.reward = tf.placeholder("float", name="reward")
+            tf.summary.scalar("Reward", self.reward)
+            self.episode_length = tf.placeholder("float", name="episode_length")
+            tf.summary.scalar("Episode_length", self.episode_length)
+            self.summary_op = tf.summary.merge(loss_summaries)
 
         self.jobs = []
         for i, env in enumerate(self.envs):
@@ -300,13 +297,14 @@ class AsyncKnowledgeTransfer(Agent):
         for i, job in enumerate(self.jobs):
             only_sparse = (self.config["switch_at_iter"] is not None and i == len(self.jobs) - 1)
             grads = tf.gradients(job.loss, (self.shared_vars if not(only_sparse) else []) + job.sparse_representations)
-            job.train_op = job.optimizer.apply_gradients(  # TODO: add inc_step
+            apply_grads = job.optimizer.apply_gradients(
                 zip(
                     grads,
                     (self.shared_vars if not(only_sparse) else []) + job.sparse_representations
-                ),
-                global_step=self.global_step
+                )
             )
+            inc_step = self.global_step.assign_add(self.n_steps)
+            job.train_op = tf.group(apply_grads, inc_step)
 
         self.session.run(tf.global_variables_initializer())
 
@@ -345,12 +343,15 @@ class AsyncKnowledgeTransfer(Agent):
         if self.config["switch_at_iter"] is None:
             idx = None
         else:
+            total_T_max = self.config["T_max"]
+            self.config["T_max"] = self.config["switch_at_iter"]
             idx = -1
         for job in self.jobs[:idx]:
             job.start()
         for job in self.jobs[:idx]:
             job.join()
         try:
+            self.config["T_max"] = total_T_max
             self.jobs[idx].start()
             self.jobs[idx].join()
         except TypeError:  # idx is None
@@ -363,25 +364,17 @@ class AsyncKnowledgeTransfer(Agent):
         return AKTThread(self, env, task_id, n_iter, start_at_iter=start_at_iter)
 
 class AsyncKnowledgeTransferRNNCNN(AsyncKnowledgeTransfer):
-    """A3C for a discrete action space"""
+    """Asynchronous knowledge transfer learner that uses an RNN and CNN."""
     def __init__(self, envs, monitor_path, **usercfg):
         self.thread_type = AKTThreadDiscreteCNNRNN
         super(AsyncKnowledgeTransferRNNCNN, self).__init__(envs, monitor_path, **usercfg)
         self.config["RNN"] = True
         self.config["n_sparse_units"] = self.config.get("n_sparse_units", 20)
 
-        self.T = 0
-        with tf.variable_scope("global"):
-            self.losses, loss_summaries = self.create_summary_losses()
-            self.reward = tf.placeholder("float", name="reward")
-            tf.summary.scalar("Reward", self.reward)
-            self.episode_length = tf.placeholder("float", name="episode_length")
-            tf.summary.scalar("Episode_length", self.episode_length)
-            self.summary_op = tf.summary.merge(loss_summaries)
-
     def build_networks(self):
         with tf.variable_scope("global"):
             self.states = tf.placeholder(tf.float32, [None] + list(self.envs[0].observation_space.shape), name="states")
+            self.n_steps = tf.shape(self.states)[0]
             x = self.states
             # Convolution layers
             for i in range(4):
@@ -397,10 +390,14 @@ class AsyncKnowledgeTransferRNNCNN(AsyncKnowledgeTransfer):
             h_init = np.zeros((1, lstm_state_size.h), np.float32)
             self.state_init = [c_init, h_init]
             self.rnn_state_in = self.enc_cell.zero_state(1, tf.float32)
+            tf.add_to_collection("rnn_state_in_c", self.rnn_state_in.c)
+            tf.add_to_collection("rnn_state_in_h", self.rnn_state_in.h)
             L3, self.rnn_state_out = tf.nn.dynamic_rnn(cell=self.enc_cell,
                                                        inputs=reshape,
                                                        initial_state=self.rnn_state_in,
                                                        dtype=tf.float32)
+            tf.add_to_collection("rnn_state_out_c", self.rnn_state_out.c)
+            tf.add_to_collection("rnn_state_out_h", self.rnn_state_out.h)
             self.L3 = tf.reshape(L3, [-1, lstm_size])
             self.knowledge_base = tf.Variable(tf.truncated_normal([self.L3.get_shape()[-1].value, self.config["n_sparse_units"]], mean=0.0, stddev=0.02), name="knowledge_base")
             self.shared_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
