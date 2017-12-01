@@ -14,7 +14,7 @@ from agents.a3c import RunnerThread
 from misc.utils import discount_rewards
 from misc.reporter import Reporter
 from agents.knowledge_transfer import TaskPolicy
-from misc.network_ops import conv2d, flatten
+from misc.network_ops import conv2d, flatten, normalized_columns_initializer
 
 class AKTThread(Thread):
     """Asynchronous knowledge transfer learner thread. Used to learn using one specific variation of a task."""
@@ -162,10 +162,10 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         tf.add_to_collection("rnn_state_out_h", self.rnn_state_out.h)
         self.L2 = tf.reshape(L3, [-1, lstm_size])
 
-        self.sparse_representation_action = tf.Variable(tf.truncated_normal([self.master.config["n_sparse_units"], self.nA], mean=0.0, stddev=0.02))
+        self.sparse_representation_action = tf.Variable(normalized_columns_initializer(0.01)([self.master.config["n_sparse_units"], self.nA]))
         self.logits = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_action), name="logits")
 
-        self.sparse_representation_value = tf.Variable(tf.truncated_normal([self.master.config["n_sparse_units"], 1], mean=0.0, stddev=0.02))
+        self.sparse_representation_value = tf.Variable(normalized_columns_initializer(1.0)([self.master.config["n_sparse_units"], 1]))
         self.value = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_value), name="logits")
 
         self.sparse_representations = [self.sparse_representation_action, self.sparse_representation_value]
@@ -401,7 +401,7 @@ class AsyncKnowledgeTransferRNNCNN(AsyncKnowledgeTransfer):
             self.L1 = tf.expand_dims(flatten(x), [0])
 
             # 256 is the LSTM size
-            self.knowledge_base = tf.Variable(tf.truncated_normal([256, self.config["n_sparse_units"]], mean=0.0, stddev=0.02), name="knowledge_base")
+            self.knowledge_base = tf.Variable(normalized_columns_initializer(0.01)([256, self.config["n_sparse_units"]]), name="knowledge_base")
             self.shared_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
 
             self.global_step = tf.get_variable("global_step", [], tf.int32, initializer=tf.constant_initializer(0, dtype=tf.int32), trainable=False)
