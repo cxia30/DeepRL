@@ -137,7 +137,7 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
     def __init__(self, master, env, thread_id, n_iter):
         super(AKTThreadDiscreteCNNRNN, self).__init__(master, env, thread_id, n_iter)
         self.rnn_state = None
-        self.initial_features = self.master.state_init
+        self.initial_features = self.state_init
         self.actor_states = self.critic_states = self.master.states
 
     def build_networks(self):
@@ -145,11 +145,28 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         self.actions_taken = tf.placeholder(tf.float32, name="actions_taken")
         self.r = tf.placeholder(tf.float32, [None], name="r")
 
+        lstm_size = 256
+        self.enc_cell = tf.contrib.rnn.BasicLSTMCell(lstm_size)
+        lstm_state_size = self.enc_cell.state_size
+        c_init = np.zeros((1, lstm_state_size.c), np.float32)
+        h_init = np.zeros((1, lstm_state_size.h), np.float32)
+        self.state_init = [c_init, h_init]
+        self.rnn_state_in = self.enc_cell.zero_state(1, tf.float32)
+        tf.add_to_collection("rnn_state_in_c", self.rnn_state_in.c)
+        tf.add_to_collection("rnn_state_in_h", self.rnn_state_in.h)
+        L3, self.rnn_state_out = tf.nn.dynamic_rnn(cell=self.enc_cell,
+                                                   inputs=self.master.L1,
+                                                   initial_state=self.rnn_state_in,
+                                                   dtype=tf.float32)
+        tf.add_to_collection("rnn_state_out_c", self.rnn_state_out.c)
+        tf.add_to_collection("rnn_state_out_h", self.rnn_state_out.h)
+        self.L2 = tf.reshape(L3, [-1, lstm_size])
+
         self.sparse_representation_action = tf.Variable(tf.truncated_normal([self.master.config["n_sparse_units"], self.nA], mean=0.0, stddev=0.02))
-        self.logits = tf.matmul(self.master.L3, tf.matmul(self.master.knowledge_base, self.sparse_representation_action), name="logits")
+        self.logits = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_action), name="logits")
 
         self.sparse_representation_value = tf.Variable(tf.truncated_normal([self.master.config["n_sparse_units"], 1], mean=0.0, stddev=0.02))
-        self.value = tf.matmul(self.master.L3, tf.matmul(self.master.knowledge_base, self.sparse_representation_value), name="logits")
+        self.value = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_value), name="logits")
 
         self.sparse_representations = [self.sparse_representation_action, self.sparse_representation_value]
 
@@ -178,8 +195,8 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
             self.actor_states: [state]
         }
         if self.rnn_state is not None:
-            feed_dict[self.master.rnn_state_in] = features
-        action, rnn_state, value = self.master.session.run([self.action, self.master.rnn_state_out, self.value], feed_dict=feed_dict)
+            feed_dict[self.rnn_state_in] = features
+        action, rnn_state, value = self.master.session.run([self.action, self.rnn_state_out, self.value], feed_dict=feed_dict)
         return action, value, rnn_state
 
     def pull_batch_from_queue(self):
@@ -204,7 +221,7 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
             self.critic_states: states
         }
         if self.rnn_state is not None:
-            feed_dict[self.master.rnn_state_in] = features
+            feed_dict[self.rnn_state_in] = features
         return self.master.session.run(self.value, feed_dict=feed_dict)[0]
 
     def run(self):
@@ -233,7 +250,7 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
             }
             feature = trajectory.features[0][0]
             if feature != []:
-                feed_dict[self.master.rnn_state_in] = feature
+                feed_dict[self.rnn_state_in] = feature
             results = sess.run(fetches, feed_dict)
             n_states = states.shape[0]
             feed_dict = dict(zip(self.master.losses, map(lambda x: x / n_states, results)))
@@ -381,25 +398,10 @@ class AsyncKnowledgeTransferRNNCNN(AsyncKnowledgeTransfer):
                 x = tf.nn.elu(conv2d(x, 32, "l{}".format(i + 1), [3, 3], [2, 2]))
 
             # Flatten
-            reshape = tf.expand_dims(flatten(x), [0])
+            self.L1 = tf.expand_dims(flatten(x), [0])
 
-            lstm_size = 256
-            self.enc_cell = tf.contrib.rnn.BasicLSTMCell(lstm_size)
-            lstm_state_size = self.enc_cell.state_size
-            c_init = np.zeros((1, lstm_state_size.c), np.float32)
-            h_init = np.zeros((1, lstm_state_size.h), np.float32)
-            self.state_init = [c_init, h_init]
-            self.rnn_state_in = self.enc_cell.zero_state(1, tf.float32)
-            tf.add_to_collection("rnn_state_in_c", self.rnn_state_in.c)
-            tf.add_to_collection("rnn_state_in_h", self.rnn_state_in.h)
-            L3, self.rnn_state_out = tf.nn.dynamic_rnn(cell=self.enc_cell,
-                                                       inputs=reshape,
-                                                       initial_state=self.rnn_state_in,
-                                                       dtype=tf.float32)
-            tf.add_to_collection("rnn_state_out_c", self.rnn_state_out.c)
-            tf.add_to_collection("rnn_state_out_h", self.rnn_state_out.h)
-            self.L3 = tf.reshape(L3, [-1, lstm_size])
-            self.knowledge_base = tf.Variable(tf.truncated_normal([self.L3.get_shape()[-1].value, self.config["n_sparse_units"]], mean=0.0, stddev=0.02), name="knowledge_base")
+            # 256 is the LSTM size
+            self.knowledge_base = tf.Variable(tf.truncated_normal([256, self.config["n_sparse_units"]], mean=0.0, stddev=0.02), name="knowledge_base")
             self.shared_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
 
             self.global_step = tf.get_variable("global_step", [], tf.int32, initializer=tf.constant_initializer(0, dtype=tf.int32), trainable=False)
