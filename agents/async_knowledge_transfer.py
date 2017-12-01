@@ -41,7 +41,7 @@ class AKTThread(Thread):
         # Write the summary of each task in a different directory
         self.writer = tf.summary.FileWriter(os.path.join(self.master.monitor_path, "task" + str(self.task_id)), self.master.session.graph)
 
-        self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.config["learning_rate"], decay=self.config["decay"], epsilon=self.config["epsilon"])
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.config["learning_rate"])
         self.runner = RunnerThread(self.env, self, 20, task_id == 0 and self.master.video)
 
     def build_networks(self):
@@ -275,9 +275,7 @@ class AsyncKnowledgeTransfer(Agent):
             n_iter=200,
             switch_at_iter=None,  # None to deactivate, otherwise an iteration at which to switch
             gamma=0.99,  # Discount past rewards by a percentage
-            decay=0.9,  # Decay of RMSProp optimizer
-            epsilon=1e-9,  # Epsilon of RMSProp optimizer
-            learning_rate=0.005,
+            learning_rate=1e-4,
             n_hidden_units=10,
             repeat_n_actions=1,
             n_task_variations=3,
