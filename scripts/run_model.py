@@ -7,8 +7,10 @@ sys.path.append(dirname(dirname(abspath(__file__))))
 
 import os
 import argparse
+import go_vncdriver
 import tensorflow as tf
 from gym import wrappers
+import numpy as np
 
 from environment.registration import make_environment
 
@@ -47,8 +49,10 @@ class ModelRunner(object):
         state = self.env.reset()
         for _ in range(self.config["episode_max_length"]):
             action = self.choose_action(state)
+            action = np.argmax(action)
             for _ in range(self.config["repeat_n_actions"]):
                 _, _, done, _ = self.env.step(action)
+                self.env.render()
                 if done:  # Don't continue if episode has already ended
                     break
             if done:
@@ -73,7 +77,7 @@ def main():
     env = make_environment(args.environment)
     runner = ModelRunner(env, args.model_directory, args.save_directory, n_iter=args.iterations)
     try:
-        runner.env = wrappers.Monitor(runner.env, args.save_directory, video_callable=False, force=True)
+        runner.env = wrappers.Monitor(runner.env, args.save_directory, video_callable=None, force=True)
         runner.run()
     except KeyboardInterrupt:
         pass
