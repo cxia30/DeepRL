@@ -163,12 +163,14 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         self.L2 = tf.reshape(L3, [-1, lstm_size])
 
         self.sparse_representation_action = tf.Variable(normalized_columns_initializer(0.01)([self.master.config["n_sparse_units"], self.nA]))
-        self.logits = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_action), name="logits")
+        self.sparse_representation_action_bias = tf.Variable(tf.constant_initializer(0.0)([self.nA]))
+        self.logits = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_action)) + self.sparse_representation_action_bias
 
         self.sparse_representation_value = tf.Variable(normalized_columns_initializer(1.0)([self.master.config["n_sparse_units"], 1]))
-        self.value = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_value), name="logits")
+        self.sparse_representation_value_bias = tf.Variable(tf.constant_initializer(0.0)([1]))
+        self.value = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_value)) + self.sparse_representation_value_bias
 
-        self.sparse_representations = [self.sparse_representation_action, self.sparse_representation_value]
+        self.sparse_representations = [self.sparse_representation_action, self.sparse_representation_action_bias, self.sparse_representation_value, self.sparse_representation_value_bias]
 
         self.probs = tf.nn.softmax(self.logits)
 
