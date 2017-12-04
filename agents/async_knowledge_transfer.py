@@ -186,7 +186,7 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
 
         self.vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
 
-        self.losses = [self.loss, self.actor_loss, self.critic_loss]
+        self.losses = [self.actor_loss, self.critic_loss, self.loss]
         # return self.action, self.value, actor_states, critic_states, actions_taken, [loss, actor_loss, critic_loss], adv, r, n_steps
 
     def choose_action(self, state, features):
