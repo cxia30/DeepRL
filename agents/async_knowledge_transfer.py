@@ -136,7 +136,6 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
     """A3CThread for a discrete action space."""
     def __init__(self, master, env, thread_id, n_iter):
         super(AKTThreadDiscreteCNNRNN, self).__init__(master, env, thread_id, n_iter)
-        self.rnn_state = None
         self.initial_features = self.state_init
         self.actor_states = self.critic_states = self.master.states
 
@@ -212,8 +211,7 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         feed_dict = {
             self.actor_states: [state]
         }
-        if self.rnn_state is not None:
-            feed_dict[self.rnn_state_in] = features
+        feed_dict[self.rnn_state_in] = features
         action, rnn_state, value = self.master.session.run([self.action, self.rnn_state_out, self.value], feed_dict=feed_dict)
         return action, value, rnn_state
 
@@ -238,8 +236,7 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         feed_dict = {
             self.critic_states: states
         }
-        if self.rnn_state is not None:
-            feed_dict[self.rnn_state_in] = features
+        feed_dict[self.rnn_state_in] = features
         return self.master.session.run(self.value, feed_dict=feed_dict)[0]
 
     def run(self):
