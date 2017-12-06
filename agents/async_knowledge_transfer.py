@@ -145,6 +145,19 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         self.actions_taken = tf.placeholder(tf.float32, name="actions_taken")
         self.r = tf.placeholder(tf.float32, [None], name="r")
 
+        x = self.master.states
+        # Convolution layers
+        for i in range(4):
+            x = tf.nn.elu(conv2d(x, 32, "l{}".format(i + 1), [3, 3], [2, 2]))
+
+        # Flatten
+        self.L1 = tf.expand_dims(flatten(x), [0])
+
+        # 256 is the LSTM size
+        self.knowledge_base = tf.Variable(normalized_columns_initializer(0.01)([self.config["lstm_size"], self.config["n_sparse_units"]]), name="knowledge_base")
+
+        self.shared_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
+
         lstm_size = self.config["lstm_size"]
         self.enc_cell = tf.contrib.rnn.BasicLSTMCell(lstm_size)
         lstm_state_size = self.enc_cell.state_size
@@ -162,13 +175,13 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         tf.add_to_collection("rnn_state_out_h", self.rnn_state_out.h)
         self.L2 = tf.reshape(L3, [-1, lstm_size])
 
-        self.sparse_representation_action = tf.Variable(normalized_columns_initializer(0.01)([self.master.config["n_sparse_units"], self.nA]))
-        self.sparse_representation_action_bias = tf.Variable(tf.constant_initializer(0.0)([self.nA]))
-        self.logits = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_action)) + self.sparse_representation_action_bias
+        self.sparse_representation_action = tf.get_variable("sparse_action/w", [self.master.config["n_sparse_units"], self.nA], initializer=normalized_columns_initializer(0.01))
+        self.sparse_representation_action_bias = tf.get_variable("sparse_action/b", [self.nA], initializer=tf.constant_initializer(0.0))
+        self.logits = tf.matmul(self.L2, tf.matmul(self.knowledge_base, self.sparse_representation_action)) + self.sparse_representation_action_bias
 
-        self.sparse_representation_value = tf.Variable(normalized_columns_initializer(1.0)([self.master.config["n_sparse_units"], 1]))
-        self.sparse_representation_value_bias = tf.Variable(tf.constant_initializer(0.0)([1]))
-        self.value = tf.matmul(self.L2, tf.matmul(self.master.knowledge_base, self.sparse_representation_value)) + self.sparse_representation_value_bias
+        self.sparse_representation_value = tf.get_variable("sparse_value/w", [self.master.config["n_sparse_units"], 1], initializer=normalized_columns_initializer(1.0))
+        self.sparse_representation_value_bias = tf.get_variable("sparse_value/b", [1], initializer=tf.constant_initializer(0.0))
+        self.value = tf.matmul(self.L2, tf.matmul(self.knowledge_base, self.sparse_representation_value)) + self.sparse_representation_value_bias
 
         self.sparse_representations = [self.sparse_representation_action, self.sparse_representation_action_bias, self.sparse_representation_value, self.sparse_representation_value_bias]
 
@@ -190,6 +203,9 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
 
         self.losses = [self.actor_loss, self.critic_loss, self.loss]
         # return self.action, self.value, actor_states, critic_states, actions_taken, [loss, actor_loss, critic_loss], adv, r, n_steps
+
+    def create_sync_net_op(self):
+        return tf.group(*[v1.assign(v2) for v1, v2 in zip(self.shared_vars, self.master.shared_vars)])
 
     def choose_action(self, state, features):
         """Choose an action."""
@@ -234,6 +250,7 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         t = 1  # thread step counter
         while self.master.global_step.eval(session=sess) < self.config["T_max"] and not self.master.stop_requested:
             # Synchronize thread-specific parameters θ' = θ and θ'v = θv
+            sess.run(self.sync_net)
             trajectory = self.pull_batch_from_queue()
             v = 0 if trajectory.terminal else self.get_critic_value(np.asarray(trajectory.states)[None, -1], trajectory.features[-1][0])
             rewards_plus_v = np.asarray(trajectory.rewards + [v])
@@ -311,8 +328,9 @@ class AsyncKnowledgeTransfer(Agent):
                     start_at_iter=(0 if self.config["switch_at_iter"] is None or i != len(self.envs) - 1 else self.config["switch_at_iter"])))
 
         for i, job in enumerate(self.jobs):
+            job.sync_net = job.create_sync_net_op()
             only_sparse = (self.config["switch_at_iter"] is not None and i == len(self.jobs) - 1)
-            grads = tf.gradients(job.loss, (self.shared_vars if not(only_sparse) else []) + job.sparse_representations)
+            grads = tf.gradients(job.loss, (job.shared_vars if not(only_sparse) else []) + job.sparse_representations)
             grads, _ = tf.clip_by_global_norm(grads, 40.0)
             apply_grads = job.optimizer.apply_gradients(
                 zip(
