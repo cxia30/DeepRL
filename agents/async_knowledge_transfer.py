@@ -42,7 +42,7 @@ class AKTThread(Thread):
         self.writer = tf.summary.FileWriter(os.path.join(self.master.monitor_path, "task" + str(self.task_id)), self.master.session.graph)
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.config["learning_rate"])
-        self.runner = RunnerThread(self.env, self, 20, task_id == 0 and self.master.video)
+        self.runner = RunnerThread(self.env, self, self.config["n_local_steps"], task_id == 0 and self.master.video)
 
     def build_networks(self):
         self.sparse_representation = tf.Variable(tf.truncated_normal([self.master.config["n_sparse_units"], self.nA], mean=0.0, stddev=0.02))
@@ -145,7 +145,7 @@ class AKTThreadDiscreteCNNRNN(AKTThread):
         self.actions_taken = tf.placeholder(tf.float32, name="actions_taken")
         self.r = tf.placeholder(tf.float32, [None], name="r")
 
-        lstm_size = 256
+        lstm_size = self.config["lstm_size"]
         self.enc_cell = tf.contrib.rnn.BasicLSTMCell(lstm_size)
         lstm_state_size = self.enc_cell.state_size
         c_init = np.zeros((1, lstm_state_size.c), np.float32)
@@ -279,10 +279,9 @@ class AsyncKnowledgeTransfer(Agent):
             gamma=0.99,  # Discount past rewards by a percentage
             learning_rate=1e-4,
             n_hidden_units=10,
-            repeat_n_actions=1,
-            n_task_variations=3,
             n_sparse_units=10,
-            feature_extraction=False
+            feature_extraction=False,
+            n_local_steps=20  # Number of steps after which parameters are updated
         ))
         self.config.update(usercfg)
 
@@ -314,6 +313,7 @@ class AsyncKnowledgeTransfer(Agent):
         for i, job in enumerate(self.jobs):
             only_sparse = (self.config["switch_at_iter"] is not None and i == len(self.jobs) - 1)
             grads = tf.gradients(job.loss, (self.shared_vars if not(only_sparse) else []) + job.sparse_representations)
+            grads, _ = tf.clip_by_global_norm(grads, 40.0)
             apply_grads = job.optimizer.apply_gradients(
                 zip(
                     grads,
@@ -384,9 +384,10 @@ class AsyncKnowledgeTransferRNNCNN(AsyncKnowledgeTransfer):
     """Asynchronous knowledge transfer learner that uses an RNN and CNN."""
     def __init__(self, envs, monitor_path, **usercfg):
         self.thread_type = AKTThreadDiscreteCNNRNN
+        usercfg["RNN"] = True
+        usercfg["n_sparse_units"] = usercfg.get("n_sparse_units", 20)
+        usercfg["lstm_size"] = usercfg.get("lstm_size", 256)
         super(AsyncKnowledgeTransferRNNCNN, self).__init__(envs, monitor_path, **usercfg)
-        self.config["RNN"] = True
-        self.config["n_sparse_units"] = self.config.get("n_sparse_units", 20)
 
     def build_networks(self):
         with tf.variable_scope("global"):
@@ -401,7 +402,7 @@ class AsyncKnowledgeTransferRNNCNN(AsyncKnowledgeTransfer):
             self.L1 = tf.expand_dims(flatten(x), [0])
 
             # 256 is the LSTM size
-            self.knowledge_base = tf.Variable(normalized_columns_initializer(0.01)([256, self.config["n_sparse_units"]]), name="knowledge_base")
+            self.knowledge_base = tf.Variable(normalized_columns_initializer(0.01)([self.config["lstm_size"], self.config["n_sparse_units"]]), name="knowledge_base")
             self.shared_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
 
             self.global_step = tf.get_variable("global_step", [], tf.int32, initializer=tf.constant_initializer(0, dtype=tf.int32), trainable=False)
